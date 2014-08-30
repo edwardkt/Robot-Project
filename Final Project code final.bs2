@@ -1,0 +1,344 @@
+' {$STAMP BS2}
+' {$PBASIC 2.5}
+
+'-- I/O Definitions --
+PingPin       PIN       15      ' Ping Sensor I/O
+PMotor        PIN       14      ' Ping Motor
+LMotor        PIN       13      ' Left Wheel Continuous Servo Motor
+RMotor        PIN       12      ' Right Wheel Continuous Servo Motor
+LLinePwr      PIN       10      ' left line sensor power
+LLineIn       PIN       9       ' left line sensor input
+RLinePwr      PIN       7       ' right line sensor power
+RLineIn       PIN       8       ' right line sensor input
+LeftLED       PIN       2       ' LED for debug
+RightLED      PIN       1       ' LED for debug
+Speaker       PIN       0       ' piezo speaker
+
+'-- Constants --
+LFwdFast      CON       880
+RFwdFast      CON       675              '560
+LFwdSlow      CON       850
+RFwdSlow      CON       560
+LStop         CON       750
+RStop         CON       750
+LRevFast      CON       650
+RRevFast      CON       850
+LRevSlow      CON       650
+RRevSlow      CON       850
+Object_Thresh CON       20
+
+'-- Variable Declarations --
+lLine         VAR        Word    ' Raw RCTIME to discharge QTI cap.
+rLine         VAR        Word    ' Raw RCTIME to discharge QTI cap.
+blackThresh   VAR        Word    ' Black threshold for QTI inputs
+lbLeft        VAR        Bit     ' Boolean 1=on Black, 0 = on White
+lbRight       VAR        Bit     ' Boolean 1=on Black, 0 = on White
+pulses        VAR        Word    ' Use as counter variable in a for loop
+N             VAR        Word    ' Set as max number of pulses to give for each maneuver
+distance_cm0  VAR        Word
+distance_cm   VAR        Word    ' Variable that displays distance
+distance_r    VAR       Word
+distance_l    VAR        Word
+object_found  VAR        Bit     ' variable shows whether object is found or not
+'pulses        VAR        Byte
+pulse_val     VAR        Byte
+ping_val      VAR        Word
+ping_heading  VAR        Word
+distance_c    VAR        Byte
+Main:
+  ping_heading = 700
+  object_found = 0
+  blackThresh = 500
+
+  'Path finding Track
+  PAUSE 2000
+  GOSUB Turn_Ping_Motor_To_Heading
+  GOSUB Check_for_objects
+  DEBUG "Distance is (cm) ", DEC distance_cm, CR
+  DO WHILE distance_cm > 15
+    GOSUB Read_Line_Sensors
+    IF lLine > blackThresh AND rLine > blackThresh THEN
+      N = 10
+      GOSUB GoLeftSlowN
+    ELSEIF lLine >blackThresh THEN
+      lbLeft = 1
+      N = 10
+      GOSUB GoRightSlowN
+    ELSEIF rLine > blackThresh THEN
+      lbRight = 1
+      N = 10
+      GOSUB GoLeftSlowN
+    ELSE
+      N = 5
+      GOSUB GoFwdN
+    ENDIF
+    GOSUB Check_for_objects
+    DEBUG "Distance is (cm) ", DEC distance_cm, CR
+    PAUSE 250
+    IF (distance_cm < Object_Thresh) THEN
+      object_found = 1
+    ENDIF
+  LOOP
+
+     'Bumps into wall and checks if robot is at an angle, if so it will allign accordingly.
+  IF distance_cm <= 15  THEN
+    GOSUB Check_for_objects
+    distance_c = distance_cm
+    ping_heading = 550
+    GOSUB Turn_Ping_Motor_To_Heading
+    GOSUB Check_for_objects
+    distance_r = distance_cm
+    ping_heading = 850
+    GOSUB Turn_Ping_Motor_To_Heading
+    GOSUB Check_for_objects
+    distance_l = distance_cm
+    DO WHILE distance_r < distance_c OR distance_l < distance_c
+      IF distance_l < distance_c  THEN
+        N = 2
+        GOSUB GoLeftSlowN
+      ELSE
+        N = 2
+        GOSUB GoRightSlowN
+      ENDIF
+      ping_heading = 700
+      GOSUB Turn_Ping_Motor_To_Heading
+      GOSUB Check_for_objects
+      distance_c = distance_cm
+      ping_heading = 550
+      GOSUB Turn_Ping_Motor_To_Heading
+      GOSUB Check_for_objects
+      distance_r = distance_cm
+      ping_heading = 850
+      GOSUB Turn_Ping_Motor_To_Heading
+      GOSUB Check_for_objects
+      distance_l = distance_cm
+    LOOP
+    'Robot moves towards alleyway entrance
+    N = 20
+    GOSUB GoRightSlowN
+    ping_heading = 1200
+    GOSUB Turn_Ping_Motor_To_Heading
+  ENDIF
+  DO WHILE distance_cm <= 25
+    N = 2
+    GOSUB GoFwdN
+    GOSUB Check_for_objects
+  LOOP
+  N = 50
+  GOSUB GoFwdN
+  N = 16
+  GOSUB GoLeftSlowN
+  ping_heading = 700
+  GOSUB Turn_Ping_Motor_To_Heading
+
+  'Start of obstacle Course
+DO
+  GOSUB Check_for_objects
+  'Checks whether it sees white/black and continously moves forward until object is spotted
+  DO WHILE distance_cm >= 5
+    GOSUB Read_Line_Sensors
+    IF lLine < blackThresh  THEN
+      lbLeft = 0
+    ELSE
+      lbLeft = 1
+    ENDIF
+    IF rLine < blackThresh  THEN
+      lbRight = 0
+    ELSE
+      lbRight = 1
+    ENDIF
+    'Senses white on either sensor, moves to end of stage function
+    IF lbRight = 0 OR lbLeft = 0 THEN
+      GOSUB EndOfStage
+    ENDIF
+    N = 1
+    GOSUB GoFwdN
+    GOSUB Check_for_objects
+  LOOP
+  ping_heading = 200
+  GOSUB Turn_Ping_Motor_To_Heading
+  PAUSE 1000
+  GOSUB Check_for_objects
+  distance_r = distance_cm
+  ping_heading = 1200
+  GOSUB Turn_Ping_Motor_To_Heading
+  PAUSE 1000
+  GOSUB Check_for_objects
+  distance_l = distance_cm
+  ping_heading = 700
+  GOSUB Turn_Ping_Motor_To_Heading
+  PAUSE 1000
+  GOSUB Check_for_objects
+  'When it does not sense white and senses a object in front
+  IF distance_l > distance_r  AND lbLeft = 1 AND lbRight = 1 THEN
+    N = 22
+    GOSUB GoLeftSlowN
+    N = 35
+    GOSUB GoFwdN
+    N = 22
+    GOSUB GoRightSlowN
+
+  ELSEIF distance_l < distance_r AND lbLeft = 1 AND lbRight = 1 THEN
+    N = 22
+    GOSUB GoRightSlowN
+    N = 35
+    GOSUB GoFwdN
+    N = 20
+    GOSUB GoLeftSlowN
+  ENDIF
+LOOP
+
+STOP
+
+
+EndofStage:
+  'When robot is not aligned
+IF lbLeft <> lbRight THEN
+  DO WHILE lbLeft <> lbRight
+    IF lbLeft = 0 AND lbRight = 1 THEN
+      N = 1
+      GOSUB GoLeftSlowN
+      PAUSE 1000
+    ELSE
+      N = 1
+      GOSUB GoRightSlowN
+      PAUSE 1000
+    ENDIF
+    GOSUB Read_Line_Sensors
+    IF lLine < blackThresh  THEN
+      lbLeft = 0
+    ELSE
+      lbLeft = 1
+    ENDIF
+    IF rLine < blackThresh  THEN
+      lbRight = 0
+    ELSE
+      lbRight = 1
+    ENDIF
+  LOOP
+  'When robot is aligned
+    ELSE
+      ping_heading = 200
+      GOSUB Turn_Ping_Motor_To_Heading
+      GOSUB Turn_Ping_Motor_To_Heading
+      GOSUB Check_for_objects
+      distance_r = distance_cm
+      ping_heading = 1200
+      GOSUB Turn_Ping_Motor_To_Heading
+      GOSUB Check_for_objects
+      distance_l = distance_cm
+      IF distance_l > distance_r THEN
+        distance_cm = distance_l - distance_r
+      ELSE
+        distance_cm = distance_r - distance_l
+      ENDIF
+    'Finds midpoint
+    IF distance_cm > 3 AND distance_l > distance_r THEN
+      N = 25
+      GOSUB GoLeftSlowN
+      PAUSE 1000
+      N = 8
+      GOSUB GoFwdN
+      N = 25
+      PAUSE 1000
+      GOSUB GoRightSlowN
+    ELSEIF distance_cm > 3 AND distance_r > distance_l THEN
+      N = 25
+      GOSUB GoRightSlowN
+      PAUSE 1000
+      N = 8
+      GOSUB GoFwdN
+      N = 25
+      PAUSE 1000
+      GOSUB GoLeftSlowN
+    ELSE
+      N = 120
+      GOSUB GoFwdN
+      STOP
+    ENDIF
+  ENDIF
+RETURN
+
+  ' Put subroutines here, end with RETURN
+Read_Line_Sensors:
+  HIGH LLinePwr                     ' activate sensors
+  HIGH RLinePwr
+  HIGH LLineIn                      ' discharge caps
+  HIGH RLineIn
+  PAUSE 1
+  RCTIME LLineIn, 1, lLine          ' read left sensor
+  RCTIME RLineIn, 1, rLine          ' read right sensor
+  LOW LLinePwr
+  LOW RLinePwr
+  DEBUG CR,"Left Line is: ", DEC5 lLine, " Right Line is: ", DEC5 rLine
+  'convert readings to bits
+  RETURN
+
+'Go forward function
+GoFwdN:
+  FOR pulses = 1 TO N
+    PULSOUT LMotor, LFwdFast
+    PULSOUT RMotor, RFwdFast
+    PAUSE 20
+  NEXT
+  RETURN
+' Go left function
+GoLeftN:
+  FOR pulses = 1 TO N
+    PULSOUT LMotor, LRevFast
+    PULSOUT RMotor, RFwdFast
+    PAUSE 20
+  NEXT
+  RETURN
+' Goes forward
+GoFwdSlowN:
+  FOR pulses = 1 TO N
+    PULSOUT LMotor, LFwdSlow
+    PULSOUT RMotor, RFwdSlow
+    PAUSE 20
+  NEXT
+  RETURN
+' Goes backward
+GoBackSlowN:
+  FOR pulses = 1 TO N
+    PULSOUT LMotor, LRevSlow
+    PULSOUT RMotor, RRevSlow
+    PAUSE 20
+  NEXT
+  RETURN
+' Turns right
+GoRightSlowN:
+  FOR pulses = 1 TO N
+    PULSOUT LMotor, LFwdSlow
+    PULSOUT RMotor, RRevSlow
+    PAUSE 20
+  NEXT
+  RETURN
+' Turns left
+GoLeftSlowN:
+  FOR pulses = 1 TO N
+    PULSOUT LMotor, LRevSlow
+    PULSOUT RMotor, RFwdSlow
+    PAUSE 20
+  NEXT
+  RETURN
+
+' Turn ping motor to whatever heading is represented by 'pulse_val' variable
+Turn_Ping_Motor_To_Heading:
+  FOR pulses = 1 TO 25
+    PULSOUT PMotor, ping_heading
+    PAUSE 20
+  NEXT
+  RETURN
+
+Check_for_Objects:
+  PULSOUT PingPin, 5
+  PULSIN PingPin, 1, ping_val
+  distance_cm0 = ping_val ** 2251
+  PAUSE 20
+  PULSOUT PingPin, 5
+  PULSIN PingPin, 1, ping_val
+  PAUSE 20
+  distance_cm = ping_val ** 2251
+  distance_cm = (distance_cm + distance_cm0) / 2
+  RETURN
